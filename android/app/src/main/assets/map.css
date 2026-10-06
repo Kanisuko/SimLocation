@@ -1,0 +1,7 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+html,body{min-height:100vh;margin:0;background:#e9edf1;font-family:system-ui}
+#map{height:100vh;width:100%}
+.node{width:26px;height:26px;border-radius:50%;background:#3482ff;color:white;border:2px solid white;box-shadow:0 2px 5px #0004;display:grid;place-items:center;font-size:12px;font-weight:600}
+.node.start{background:#188c4b}.node.end{background:#48546a}
+#tile-status{position:absolute;z-index:900;top:12px;left:50%;transform:translateX(-50%);width:80%;padding:10px;border-radius:12px;background:#fff;color:#555;font-size:12px;box-shadow:0 3px 12px #0002}
+.leaflet-control-attribution{font-size:9px!important}
