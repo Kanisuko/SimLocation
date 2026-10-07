@@ -46,6 +46,8 @@ import java.util.concurrent.Executors
 class MainActivity : ComponentActivity() {
     private val worker = Executors.newSingleThreadExecutor()
     private var rootReady by mutableStateOf(false)
+    private var rootChecking by mutableStateOf(false)
+    private var rootStatus by mutableStateOf("正在检测 Root…")
     private var message by mutableStateOf("")
     private var points by mutableStateOf(doubleArrayOf())
     private var selected by mutableStateOf(doubleArrayOf(31.2304,121.4737))
@@ -217,6 +219,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+        authorize(showResult=false)
     }
     @Composable private fun MapPage() {
         Column(Modifier.fillMaxSize()) {
@@ -238,7 +241,11 @@ class MainActivity : ComponentActivity() {
                     }
                 } else {
                     Text(String.format(Locale.ROOT,"%.6f, %.6f · WGS84",selected[0],selected[1]),fontSize=14.sp)
-                    Action("模拟到此位置",!running&&!pending,Modifier.fillMaxWidth(),true) { start(selected,0.0) }
+                    Action("模拟到此位置",!running&&!pending,Modifier.fillMaxWidth(),true) { start(selected) }
+                    if(running&&LocationService.singlePoint) {
+                        Text("单点位置持续发送中；地图应用是否采用，请到设置中的功能验证核对。",fontSize=13.sp)
+                        Action("停止单点定位",!pending,Modifier.fillMaxWidth()) { control("stop") }
+                    }
                 }
             }
         }
@@ -277,8 +284,8 @@ class MainActivity : ComponentActivity() {
                 Box(Modifier.fillMaxWidth().height(5.dp).background(MiuixTheme.colorScheme.secondaryContainer)) {
                     Box(Modifier.fillMaxWidth(routeProgress/1000f).height(5.dp).background(MiuixTheme.colorScheme.primary))
                 }
-                Text(routeSummary(),fontSize=13.sp,modifier=Modifier.padding(top=10.dp))
-                Action("开始路线回放",!running&&!pending&&points.size>=4,Modifier.fillMaxWidth(),true) { start(points,speed.toDouble()) }
+                Text(if(running&&LocationService.singlePoint) "当前为单点定位，位置持续发送" else routeSummary(),fontSize=13.sp,modifier=Modifier.padding(top=10.dp))
+                Action("开始路线回放",!running&&!pending&&points.size>=4,Modifier.fillMaxWidth(),true) { start(points) }
                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                     Action(if(paused) "继续" else "暂停",running,Modifier.weight(1f)) { control("pause") }
                     Action("停止并恢复定位",!pending,Modifier.weight(1f)) { control("stop") }
@@ -287,18 +294,21 @@ class MainActivity : ComponentActivity() {
             Card(Modifier.fillMaxWidth(),insideMargin=PaddingValues(16.dp)) {
                 Text("运动参数",fontSize=20.sp,fontWeight=FontWeight.Bold)
                 Spacer(Modifier.height(12.dp))
-                Field("速度 km/h",speed,editable&&!paceEnabled) { speed=it }
-                Field("速度波动 ±%",variation,editable&&!paceEnabled) { variation=it }
-                Field("波动周期 / s",period,editable&&!paceEnabled) { period=it }
-                if(paceEnabled) Text("配速模型已启用，以上基础速度参数不参与计算。",fontSize=13.sp)
+                Toggle("使用配速模型",paceEnabled,editable) { paceEnabled=it }
+                if(!paceEnabled) {
+                    Field("速度 km/h",speed,editable) { speed=it }
+                    Field("速度波动 ±%",variation,editable) { variation=it }
+                    Field("波动周期 / s",period,editable) { period=it }
+                } else Text("速度由下方的配速范围、目标配速和波动参数控制。关闭配速模型后可编辑基础速度参数。",fontSize=13.sp)
                 Field("定位更新间隔 / s",interval,editable) { interval=it }
                 Field("随机种子",seed,editable) { seed=it }
                 Row(Modifier.fillMaxWidth().padding(vertical=12.dp),verticalAlignment=Alignment.CenterVertically) {
                     Text("往返循环",modifier=Modifier.weight(1f)); Switch(loop,{ loop=it },enabled=editable&&!LocationService.live)
                 }
-                Text("终点沿原路返回。运行时参数锁定，暂停后保存生效。",fontSize=13.sp)
-                Action("保存参数",editable,Modifier.fillMaxWidth()) { saveMotion(); if(running) startService(motion(Intent(this@MainActivity,LocationService::class.java).setAction("settings"),speed.toDouble()).putExtra("loop",if(LocationService.live) false else loop)); report("参数已保存") }
+                Text("终点沿原路返回。运行时参数锁定，暂停后保存生效。单点模式仅应用定位更新间隔，运动参数用于下一次路线回放。",fontSize=13.sp)
+                Action("保存参数",editable,Modifier.fillMaxWidth()) { applyMotion() }
             }
+            if(paceEnabled) PaceSettings(showSwitch=false)
         }
     }
     @Composable private fun SettingsPage() {
@@ -317,8 +327,9 @@ class MainActivity : ComponentActivity() {
             PaceSettings()
             Card(Modifier.fillMaxWidth(),insideMargin=PaddingValues(16.dp)) {
                 Text("设备与权限",fontSize=20.sp,fontWeight=FontWeight.Bold)
-                Text(if(rootReady) "Root 已验证" else "尚未验证 Root",modifier=Modifier.padding(vertical=12.dp))
-                Action("验证 Root 权限",!pending,Modifier.fillMaxWidth(),true) { authorize() }
+                Text(rootStatus,modifier=Modifier.padding(vertical=12.dp))
+                Action("重新检测 Root",!pending&&!rootChecking,Modifier.fillMaxWidth(),true) { authorize() }
+                Action("检查并授予应用权限",!pending,Modifier.fillMaxWidth()) { requestRuntimePermissions() }
                 Text("精确位置与通知权限用于前台回放。HyperOS 请保留最近任务，退出前停止回放。",fontSize=13.sp)
             }
             Card(Modifier.fillMaxWidth(),insideMargin=PaddingValues(16.dp)) {
@@ -332,7 +343,7 @@ class MainActivity : ComponentActivity() {
             }
             Card(Modifier.fillMaxWidth(),insideMargin=PaddingValues(16.dp)) {
                 Text("SimLocation",fontSize=23.sp,fontWeight=FontWeight.Bold)
-                Text("0.5.0 · Kanisuko\nRoot Edition · Redmi K60 / HyperOS 3\norg.ethertaco.simlocation",modifier=Modifier.padding(vertical=10.dp))
+                Text("0.5.1 · Kanisuko\nRoot Edition · Redmi K60 / HyperOS 3\norg.ethertaco.simlocation",modifier=Modifier.padding(vertical=10.dp))
                 Text("系统测试定位源；可选现代 LSPosed 系统后端。\n界面：Miuix · 地图：Leaflet / OpenStreetMap",fontSize=13.sp)
                 Action("开源许可",true,Modifier.fillMaxWidth()) { showLicense() }
             }
@@ -356,12 +367,12 @@ class MainActivity : ComponentActivity() {
             Action("保存定位源",editable,Modifier.fillMaxWidth()) { saveSources(); report("定位源已保存，下次启动生效") }
         }
     }
-    @Composable private fun PaceSettings() {
+    @Composable private fun PaceSettings(showSwitch:Boolean=true) {
         val editable=!pending&&(!running||paused)
         var advanced by rememberSaveable { mutableStateOf(false) }
         Card(Modifier.fillMaxWidth(),insideMargin=PaddingValues(16.dp)) {
             Text("运动模型",fontSize=20.sp,fontWeight=FontWeight.Bold)
-            Toggle("启用配速与速度波动",paceEnabled,editable) { paceEnabled=it }
+            if(showSwitch) Toggle("启用配速与速度波动",paceEnabled,editable) { paceEnabled=it }
             AnimatedVisibility(paceEnabled) {
                 Column {
                     TextField(paceFast,{ paceFast=it },label="最快巡航配速 / 分:秒",enabled=editable,singleLine=true,modifier=Modifier.fillMaxWidth().padding(bottom=10.dp))
@@ -383,7 +394,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
-            Action("保存运动模型",editable,Modifier.fillMaxWidth()) { saveMotion(); if(running) startService(motion(Intent(this@MainActivity,LocationService::class.java).setAction("settings"),speed.toDouble()).putExtra("loop",if(LocationService.live) false else loop)); report("运动模型已保存") }
+            Action("保存运动模型",editable,Modifier.fillMaxWidth()) { applyMotion() }
         }
     }
     @Composable private fun WirelessSettings() {
@@ -411,7 +422,7 @@ class MainActivity : ComponentActivity() {
             Toggle("修改接收位置的 mock 属性（实验）",clearMock,editable) { clearMock=it }
             Text("四项可独立组合，仅在位置回放期间生效。停止或 12 s 心跳超时会恢复原结果；不修改真实无线连接、SIM 或公网 IP。mock 选项只改变位置对象的属性，不能保证不可检测。",fontSize=13.sp)
             TextField(targets,{ targets=it },label="额外作用的应用包名 / 每行一个",enabled=editable,singleLine=false,modifier=Modifier.fillMaxWidth().padding(vertical=12.dp))
-            Text("空白表示仅 SimLocation 自身验证。指定应用的数据在系统侧处理，不向应用进程注入；已经建立的基站订阅需重新订阅。",fontSize=13.sp)
+            Text("空白表示仅 SimLocation 自身验证；第三方应用的 WiFi／基站和 mock 属性不会改变。高德地图包名为 com.autonavi.minimap。指定应用的数据在系统侧处理，不向应用进程注入；已经建立的基站订阅需重新订阅。",fontSize=13.sp)
             Text("场景：${initial.data.getString("name")} · ${initial.wifi.size} 个 AP · ${initial.cells.size} 个基站",modifier=Modifier.padding(top=12.dp))
             Toggle("编辑观测场景",advanced,editable) { advanced=it }
             AnimatedVisibility(advanced) {
@@ -504,8 +515,14 @@ class MainActivity : ComponentActivity() {
         points=next.clone(); updateMap()
     }
     private fun confirmClear() { android.app.AlertDialog.Builder(this).setTitle("清空路线？").setMessage("已保存的节点会被移除。").setNegativeButton("取消",null).setPositiveButton("清空") { _,_ -> try { saveRoute(doubleArrayOf()) } catch(ex:Exception) { report(ex.message!!) } }.show() }
-    private fun settings()=Playback.Settings(speed.toDouble(),variation.toDouble(),period.toDouble(),interval.toDouble(),loop,seed.toLong())
-    private fun profile()=MotionProfile(paceEnabled,MotionProfile.pace(paceFast),MotionProfile.pace(paceSlow),MotionProfile.pace(paceTarget),paceSigma.toDouble(),paceCorrelation.toDouble(),paceAccel.toDouble(),paceDecel.toDouble(),paceTurn.toDouble(),paceLookAhead.toDouble(),paceStopEvery.toDouble(),paceStopFor.toDouble())
+    private fun settings()=Playback.Settings(if(paceEnabled) 0.0 else speed.toDouble(),if(paceEnabled) 0.0 else variation.toDouble(),if(paceEnabled) 10.0 else period.toDouble(),interval.toDouble(),loop,seed.toLong())
+    private fun profile()=if(!paceEnabled) MotionProfile.disabled() else MotionProfile(true,MotionProfile.pace(paceFast),MotionProfile.pace(paceSlow),MotionProfile.pace(paceTarget),paceSigma.toDouble(),paceCorrelation.toDouble(),paceAccel.toDouble(),paceDecel.toDouble(),paceTurn.toDouble(),paceLookAhead.toDouble(),paceStopEvery.toDouble(),paceStopFor.toDouble())
+    private fun applyMotion() {
+        require(!pending&&(!running||paused)) { "请暂停后修改参数" }
+        saveMotion()
+        if(running) startService(motion(Intent(this,LocationService::class.java).setAction("settings")).putExtra("loop",if(LocationService.live||LocationService.singlePoint) false else loop))
+        report(if(running) "参数已保存并应用到暂停的回放" else "参数已保存")
+    }
     private fun saveSources() {
         require(gpsEnabled||networkEnabled) { "至少启用一个定位源" }
         require(gpsAccuracy.toDouble().isFinite() && gpsAccuracy.toDouble() in 0.01..10000.0 && networkAccuracy.toDouble().isFinite() && networkAccuracy.toDouble() in 0.01..10000.0 && networkInterval.toDouble().isFinite() && networkInterval.toDouble() in 0.2..60.0) { "精度应大于 0 且不超过 10000 m；间隔为 0.2–60 s" }
@@ -526,31 +543,34 @@ class MainActivity : ComponentActivity() {
             .putString("pace-sigma",paceSigma).putString("pace-correlation",paceCorrelation).putString("pace-accel",paceAccel).putString("pace-decel",paceDecel)
             .putString("pace-turn",paceTurn).putString("pace-lookahead",paceLookAhead).putString("pace-stop-every",paceStopEvery).putString("pace-stop-for",paceStopFor).apply()
     }
-    private fun motion(intent:Intent,kmh:Double):Intent {
-        settings(); val p=profile()
-        return intent.putExtra("speed",kmh).putExtra("variation",variation.toDouble()).putExtra("period",period.toDouble())
+    private fun motion(intent:Intent):Intent {
+        val s=settings(); val p=profile()
+        return intent.putExtra("speed",s.speed*3.6).putExtra("variation",s.variation*100).putExtra("period",s.period)
             .putExtra("interval",interval.toDouble()).putExtra("seed",seed.toLong()).putExtra("loop",loop)
             .putExtra("pace-enabled",p.enabled).putExtra("pace-fast",p.fastest).putExtra("pace-slow",p.slowest).putExtra("pace-target",p.target)
-            .putExtra("pace-sigma",paceSigma.toDouble()).putExtra("pace-correlation",p.correlation).putExtra("pace-accel",p.acceleration).putExtra("pace-decel",p.deceleration)
+            .putExtra("pace-sigma",p.sigma*3.6).putExtra("pace-correlation",p.correlation).putExtra("pace-accel",p.acceleration).putExtra("pace-decel",p.deceleration)
             .putExtra("pace-turn",p.turnFactor).putExtra("pace-lookahead",p.lookAhead).putExtra("pace-stop-every",p.stopEvery).putExtra("pace-stop-for",p.stopFor)
     }
-    private fun start(coordinates:DoubleArray,kmh:Double) {
-        require(rootReady) { "请到设置页验证 Root 权限" }
+    private fun start(coordinates:DoubleArray) {
+        require(rootReady) { if(rootChecking) "正在检测 Root，请稍候" else "未获得 Root，请检查 Root 管理器授权" }
         require(checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED) { "请允许精确位置权限" }
         val parsed=Route(coordinates)
         if(coordinates.size>2) require(parsed.total>0) { "路线需要至少两个不同节点" }
         val intent=Intent(this,LocationService::class.java).setAction("start").putExtra("points",coordinates)
         sources(intent)
-        if(coordinates.size>2) { saveMotion(); motion(intent,kmh) } else intent.putExtra("speed",0.0)
+        if(coordinates.size>2) { saveMotion(); motion(intent) } else {
+            Playback.Settings(0.0,0.0,10.0,interval.toDouble(),false,42)
+            intent.putExtra("speed",0.0).putExtra("interval",interval.toDouble())
+        }
         pending=true; message=""; startForegroundService(intent)
     }
     private fun startLive() {
-        require(rootReady) { "请到设置页验证 Root 权限" }
+        require(rootReady) { if(rootChecking) "正在检测 Root，请稍候" else "未获得 Root，请检查 Root 管理器授权" }
         require(checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED) { "请允许精确位置权限" }
         require(livePoints.isNotEmpty()) { "请先选择起点" }
         saveMotion()
         if(liveCurves) livePoints=Trajectory.rounded(livePoints,liveRadius.toDouble())
-        val intent=motion(sources(Intent(this,LocationService::class.java).setAction("start")),speed.toDouble())
+        val intent=motion(sources(Intent(this,LocationService::class.java).setAction("start")))
             .putExtra("points",livePoints).putExtra("live",true).putExtra("loop",false)
         pending=true; message=""; startForegroundService(intent)
     }
@@ -571,14 +591,27 @@ class MainActivity : ComponentActivity() {
             startForegroundService(Intent(this,LocationService::class.java).setAction(action))
         } else if(running) startService(Intent(this,LocationService::class.java).setAction(action))
     }
-    private fun authorize() {
-        message="等待 Root 授权…"
+    private fun authorize(showResult:Boolean=true) {
+        if(rootChecking) return
+        rootChecking=true; rootStatus="正在检测 Root…"
         worker.execute {
             try { RootAccess.verify(); runOnUiThread {
-                rootReady=true; message="Root 已验证"
-                permissions.launch(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION,Manifest.permission.ACCESS_FINE_LOCATION,Manifest.permission.POST_NOTIFICATIONS,Manifest.permission.READ_PHONE_STATE))
-            } } catch(ex:Exception) { report(ex.message ?: "Root 验证失败") }
+                if(isDestroyed||isFinishing) return@runOnUiThread
+                rootChecking=false; rootReady=true; rootStatus="Root 已自动检测 · UID 0"
+                if(showResult) report("Root 已验证")
+                requestRuntimePermissions()
+            } } catch(ex:Exception) { runOnUiThread {
+                if(!isDestroyed&&!isFinishing) { rootChecking=false; rootReady=false; rootStatus=ex.message ?: "Root 检测失败"; if(showResult) report(rootStatus) }
+            } }
         }
+    }
+    private fun requestRuntimePermissions() {
+        val requested=mutableListOf<String>()
+        if(checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)!=PackageManager.PERMISSION_GRANTED || checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)!=PackageManager.PERMISSION_GRANTED)
+            requested.addAll(listOf(Manifest.permission.ACCESS_COARSE_LOCATION,Manifest.permission.ACCESS_FINE_LOCATION))
+        for(permission in listOf(Manifest.permission.POST_NOTIFICATIONS,Manifest.permission.READ_PHONE_STATE))
+            if(checkSelfPermission(permission)!=PackageManager.PERMISSION_GRANTED) requested.add(permission)
+        if(requested.isNotEmpty()) permissions.launch(requested.toTypedArray())
     }
     @Suppress("DEPRECATION") private fun search(query:String) {
         require(Geocoder.isPresent()) { "系统地理编码不可用，请使用坐标或地图选点" }
@@ -617,7 +650,7 @@ class MainActivity : ComponentActivity() {
                     return true
                 }
             }
-            view.settings.apply { javaScriptEnabled=true; allowFileAccess=false; allowContentAccess=false; mixedContentMode=WebSettings.MIXED_CONTENT_NEVER_ALLOW; userAgentString="SimLocation/0.5.0 (Android; org.ethertaco.simlocation)" }
+            view.settings.apply { javaScriptEnabled=true; allowFileAccess=false; allowContentAccess=false; mixedContentMode=WebSettings.MIXED_CONTENT_NEVER_ALLOW; userAgentString="SimLocation/0.5.1 (Android; org.ethertaco.simlocation)" }
             view.addJavascriptInterface(object {
                 @JavascriptInterface fun tap(lat:Double,lon:Double) { runOnUiThread {
                     if(showLive) { try { appendLive(doubleArrayOf(lat,lon)) } catch(ex:Exception) { report(ex.message ?: "追加失败") }; return@runOnUiThread }

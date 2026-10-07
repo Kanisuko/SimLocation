@@ -25,6 +25,7 @@ public final class LocationService extends Service {
     static volatile double[] current;
     static volatile double[] activeRoute;
     static volatile boolean live;
+    static volatile boolean singlePoint;
     static volatile double currentSpeed, currentAcceleration;
     static volatile String activeConfiguration="无活动配置";
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -75,7 +76,7 @@ public final class LocationService extends Service {
                 activeRoute=playback.route.points;
                 progress=playback.route.total == 0 ? 0 : (int)(1000*position/playback.route.total);
                 status = String.format(Locale.ROOT,"%s · %.6f, %.6f\n%.1f / %.1f m · %.2f km/h · %.1f s · %d 往返",
-                    playback.paused ? "已暂停" : playback.completed() ? live ? "等待追加路径" : "停留终点" : playback.backwards() ? "返程中" : "运行中",
+                    playback.paused ? "已暂停" : singlePoint ? "单点定位中" : playback.completed() ? live ? "等待追加路径" : "停留终点" : playback.backwards() ? "返程中" : "运行中",
                     point[0],point[1],position,playback.route.total,playback.speed()*3.6,playback.elapsed,playback.laps());
                 handler.postDelayed(this,Math.round(playback.settings.interval*1000));
             } catch (Exception ex) { fail(ex); }
@@ -113,7 +114,12 @@ public final class LocationService extends Service {
         }
         if ("settings".equals(intent.getAction())) {
             if (playback != null && playback.paused) {
-                try { playback.configure(settings(intent)); playback.configureProfile(profile(intent)); describeConfiguration(); }
+                try {
+                    Playback.Settings next=singlePoint ? fixedSettings(intent) : settings(intent);
+                    MotionProfile nextProfile=singlePoint ? MotionProfile.disabled() : profile(intent);
+                    playback.configure(next); playback.configureProfile(nextProfile); describeConfiguration();
+                    lastNetwork=0; handler.removeCallbacks(tick); handler.post(tick);
+                }
                 catch (Exception ex) { status="参数无效："+ex.getMessage(); }
             }
             return START_NOT_STICKY;
@@ -130,8 +136,9 @@ public final class LocationService extends Service {
         final Playback.Settings nextSettings;
         try {
             next = new Route(intent.getDoubleArrayExtra("points"));
-            nextSettings=settings(intent);
-            profile(intent);
+            boolean fixed=next.points.length==2&&!intent.getBooleanExtra("live",false);
+            nextSettings=fixed ? fixedSettings(intent) : settings(intent);
+            if(!fixed) profile(intent);
             gpsEnabled=intent.getBooleanExtra("gps-enabled",true); networkEnabled=intent.getBooleanExtra("network-enabled",true);
             gpsAccuracy=(float)intent.getDoubleExtra("gps-accuracy",5); networkAccuracy=(float)intent.getDoubleExtra("network-accuracy",50);
             networkInterval=intent.getDoubleExtra("network-interval",1);
@@ -169,7 +176,8 @@ public final class LocationService extends Service {
                             manager.setTestProviderEnabled(provider,true);
                         }
                         playback=new Playback(next,nextSettings); pausedState=false; progress=0;
-                        playback.configureProfile(profile(intent)); playback.streaming=intent.getBooleanExtra("live",false); live=playback.streaming;
+                        playback.streaming=intent.getBooleanExtra("live",false); live=playback.streaming; singlePoint=next.points.length==2&&!live;
+                        playback.configureProfile(singlePoint ? MotionProfile.disabled() : profile(intent));
                         lastNetwork=0; previousSpeed=0; activeRoute=playback.route.points;
                         describeConfiguration();
                         lastTick=SystemClock.elapsedRealtime(); running=true;
@@ -191,6 +199,9 @@ public final class LocationService extends Service {
             intent.getDoubleExtra("period",10),intent.getDoubleExtra("interval",1),
             intent.getBooleanExtra("loop",false),intent.getLongExtra("seed",42));
     }
+    private Playback.Settings fixedSettings(Intent intent) {
+        return new Playback.Settings(0,0,10,intent.getDoubleExtra("interval",1),false,42);
+    }
     private MotionProfile profile(Intent i) {
         return new MotionProfile(i.getBooleanExtra("pace-enabled",false),i.getDoubleExtra("pace-fast",180),i.getDoubleExtra("pace-slow",540),
             i.getDoubleExtra("pace-target",360),i.getDoubleExtra("pace-sigma",0.8),i.getDoubleExtra("pace-correlation",10),
@@ -198,12 +209,12 @@ public final class LocationService extends Service {
             i.getDoubleExtra("pace-lookahead",15),i.getDoubleExtra("pace-stop-every",0),i.getDoubleExtra("pace-stop-for",5));
     }
     private void describeConfiguration() {
-        activeConfiguration=(gpsEnabled ? "GPS "+gpsAccuracy+" m " : "")+(networkEnabled ? "network "+networkAccuracy+" m / "+networkInterval+" s " : "")
+        activeConfiguration=(singlePoint ? "单点定位 · " : "路线回放 · ")+(gpsEnabled ? "GPS "+gpsAccuracy+" m " : "")+(networkEnabled ? "network "+networkAccuracy+" m / "+networkInterval+" s " : "")+"发送间隔 "+playback.settings.interval+" s · "
             +(playback.profile.enabled ? "配速模型："+playback.profile.fastest+"–"+playback.profile.slowest+" s/km" : "基础速度模型")+BackendController.description();
     }
     @Override public void onDestroy() {
         BackendController.end();
-        destroyed=true; generation++; running=false; live=false; pausedState=false; progress=0; current=null; currentSpeed=0; currentAcceleration=0; activeRoute=null; activeConfiguration="无活动配置"; handler.removeCallbacks(tick);
+        destroyed=true; generation++; running=false; live=false; singlePoint=false; pausedState=false; progress=0; current=null; currentSpeed=0; currentAcceleration=0; activeRoute=null; activeConfiguration="无活动配置"; handler.removeCallbacks(tick);
         if (wakeLock.isHeld()) wakeLock.release();
         boolean cleaned=true;
         for (String provider : new String[]{"gps","network"}) {

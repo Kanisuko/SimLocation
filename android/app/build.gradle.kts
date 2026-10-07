@@ -3,7 +3,10 @@ plugins { id("com.android.application"); id("org.jetbrains.kotlin.plugin.compose
 android {
     namespace = "org.ethertaco.simlocation"
     compileSdk = 36
-    defaultConfig { applicationId = "org.ethertaco.simlocation"; minSdk = 35; targetSdk = 35; versionCode = 5; versionName = "0.5.0"; testInstrumentationRunner = "org.ethertaco.simlocation.BackendTestRunner" }
+    defaultConfig {
+        applicationId = "org.ethertaco.simlocation"; minSdk = 35; targetSdk = 35; versionCode = 6; versionName = "0.5.1"
+        testInstrumentationRunner = "org.ethertaco.simlocation.BackendTestRunner"
+    }
     buildFeatures { compose = true; buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     signingConfigs {

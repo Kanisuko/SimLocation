@@ -6,7 +6,7 @@
 
 Android Root 位置与路径模拟应用。界面使用 Kotlin / Compose / Miuix，定位服务与运动算法使用 Java。
 
-0.5.0 提供五个页面：**地图 / 路线 / 实时 / 回放 / 设置**。
+0.5.1 提供五个页面：**地图 / 路线 / 实时 / 回放 / 设置**，启动时自动检测应用 Root 权限。
 
 - 地图选择位置、编辑节点，GPX 导入导出，路线与参数保存。
 - 实时模式选择起点、点击添加途经点或手绘路径，运行中继续追加；按运动模型回放，不以手指速度瞬移。
@@ -22,6 +22,6 @@ WiFi / 基站数据需要对应地点的场景；样例标识不能转换为所�
 0.5.0 已在 K60 / HyperOS 3 / LSPosed API 102 上通过仅本应用的样例数据替换、Location 属性和租约恢复测试；第三方定位 SDK 与其他设备尚未验证。
 项目不承诺绝对不可检测，不实现目标应用的 Hook 检测隐藏。
 
-[Android 构建与使用](android/README.md) · [系统后端适配方案](android/SYSTEM_BACKEND.md) · [第三方组件](android/THIRD_PARTY_NOTICES.md)。
+[Android 构建与使用](android/README.md) · [计划与剩余功能](ROADMAP.md) · [系统后端适配方案](android/SYSTEM_BACKEND.md) · [第三方组件](android/THIRD_PARTY_NOTICES.md)。
 
 仓库仅保留 Android SimLocation。原桌面 Python/Web 服务、ADB 工作台、旧项目测试与入口已移除；Leaflet 资源直接随 Android 应用打包。
