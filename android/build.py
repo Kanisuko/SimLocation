@@ -20,8 +20,8 @@ def run(*args, env=None):
 def main():
     sdk = Path(os.environ.get('ANDROID_SDK_ROOT') or os.environ.get('ANDROID_HOME')
                or Path.home() / 'AppData' / 'Local' / 'Android' / 'Sdk')
-    if not (sdk / 'platforms' / 'android-35' / 'android.jar').exists():
-        raise SystemExit('Install Android SDK platform 35 first; set ANDROID_HOME if needed.')
+    if not (sdk / 'platforms' / 'android-36' / 'android.jar').exists():
+        raise SystemExit('Install Android SDK platform 36 first; set ANDROID_HOME if needed.')
     executables = {name: shutil.which(name) for name in ('java', 'javac', 'keytool')}
     if not all(executables.values()):
         raise SystemExit('JDK 17+ with java, javac and keytool must be on PATH.')
@@ -32,8 +32,9 @@ def main():
         SOURCES / 'java/org/ethertaco/simlocation/Route.java',
         SOURCES / 'java/org/ethertaco/simlocation/Playback.java',
         SOURCES / 'java/org/ethertaco/simlocation/MotionProfile.java', SOURCES / 'java/org/ethertaco/simlocation/Trajectory.java',
-        ROOT / 'tests/android/RouteTest.java', ROOT / 'tests/android/PlaybackTest.java', ROOT / 'tests/android/MotionTest.java')
-    for name in ('RouteTest', 'PlaybackTest', 'MotionTest'):
+        SOURCES / 'java/org/ethertaco/simlocation/SessionPolicy.java',
+        ROOT / 'tests/android/RouteTest.java', ROOT / 'tests/android/PlaybackTest.java', ROOT / 'tests/android/MotionTest.java', ROOT / 'tests/android/SessionPolicyTest.java')
+    for name in ('RouteTest', 'PlaybackTest', 'MotionTest', 'SessionPolicyTest'):
         run(executables['java'], '-cp', tests, 'org.ethertaco.simlocation.' + name)
     key = OUT / 'debug.keystore'
     if not key.exists():

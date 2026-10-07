@@ -156,8 +156,9 @@ public final class LocationService extends Service {
                     if (!recovery.edit().putString("original-mode",original).commit()) throw new IllegalStateException("无法保存恢复状态");
                 }
                 RootAccess.allowMock();
+                BackendController.begin(this,gpsEnabled,networkEnabled);
                 handler.post(() -> {
-                    if (destroyed || request != generation) return;
+                    if (destroyed || request != generation) { BackendController.end(); return; }
                     try {
                         for (String provider : new String[]{"gps","network"}) {
                             if("gps".equals(provider)&&!gpsEnabled || "network".equals(provider)&&!networkEnabled) continue;
@@ -198,9 +199,10 @@ public final class LocationService extends Service {
     }
     private void describeConfiguration() {
         activeConfiguration=(gpsEnabled ? "GPS "+gpsAccuracy+" m " : "")+(networkEnabled ? "network "+networkAccuracy+" m / "+networkInterval+" s " : "")
-            +(playback.profile.enabled ? "配速模型："+playback.profile.fastest+"–"+playback.profile.slowest+" s/km" : "基础速度模型");
+            +(playback.profile.enabled ? "配速模型："+playback.profile.fastest+"–"+playback.profile.slowest+" s/km" : "基础速度模型")+BackendController.description();
     }
     @Override public void onDestroy() {
+        BackendController.end();
         destroyed=true; generation++; running=false; live=false; pausedState=false; progress=0; current=null; currentSpeed=0; currentAcceleration=0; activeRoute=null; activeConfiguration="无活动配置"; handler.removeCallbacks(tick);
         if (wakeLock.isHeld()) wakeLock.release();
         boolean cleaned=true;

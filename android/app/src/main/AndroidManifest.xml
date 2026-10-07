@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+  <permission android:name="org.ethertaco.simlocation.FRAMEWORK_BIND" android:protectionLevel="signature"/>
   <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
   <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
@@ -7,7 +8,10 @@
   <uses-permission android:name="android.permission.WAKE_LOCK"/>
   <uses-permission android:name="android.permission.INTERNET"/>
   <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
-  <application android:label="SimLocation" android:icon="@drawable/ic_launcher" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:allowBackup="false">
+  <uses-permission android:name="android.permission.READ_PHONE_STATE"/>
+  <application android:name=".SimLocationApp" android:label="SimLocation" android:description="@string/module_description" android:icon="@drawable/ic_launcher" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:allowBackup="false">
+    <provider android:name=".BackendHealthProvider" android:authorities="org.ethertaco.simlocation.health" android:exported="true"/>
+    <provider android:name="io.github.libxposed.service.XposedProvider" android:permission="org.ethertaco.simlocation.FRAMEWORK_BIND" tools:node="merge"/>
     <activity android:name=".MainActivity" android:exported="true">
       <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
     </activity>

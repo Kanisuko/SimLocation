@@ -86,8 +86,28 @@ class MainActivity : ComponentActivity() {
     private var liveCurves by mutableStateOf(true)
     private var liveRadius by mutableStateOf("6")
     private var readbacks by mutableStateOf("")
+    private var backendStatus by mutableStateOf(BackendController.status)
     private var speedHistory by mutableStateOf(listOf<Double>())
     private var observer:Diagnostics?=null
+    private var wirelessJson by mutableStateOf(WirelessScenario.example())
+    private var wirelessExport=""
+    private val importWireless=registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if(uri!=null&&!running&&!pending) worker.execute {
+            try {
+                val bytes=contentResolver.openInputStream(uri)!!.use { it.readNBytes(60001) }
+                require(bytes.size<=60000) { "场景文件超过 60 KB" }
+                val validated=WirelessScenario(bytes.toString(Charsets.UTF_8)).data.toString()
+                runOnUiThread { if(!running&&!pending) saveWireless(validated) }
+            } catch(ex:Exception) { report(ex.message ?: "场景导入失败") }
+        }
+    }
+    private val exportWireless=registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        val snapshot=wirelessExport
+        if(uri!=null) worker.execute {
+            try { contentResolver.openOutputStream(uri)!!.use { it.write(snapshot.toByteArray(Charsets.UTF_8)) }; report("场景已导出") }
+            catch(ex:Exception) { report(ex.message ?: "场景导出失败") }
+        }
+    }
     private var web: WebView? = null
     private var mapLoaded = false
     private val permissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -151,6 +171,7 @@ class MainActivity : ComponentActivity() {
         val sources=getSharedPreferences("signals",MODE_PRIVATE)
         gpsEnabled=sources.getBoolean("gps",true); networkEnabled=sources.getBoolean("network",true)
         gpsAccuracy=sources.getString("gps-accuracy","5")!!; networkAccuracy=sources.getString("network-accuracy","50")!!; networkInterval=sources.getString("network-interval","1")!!
+        try { wirelessJson=BackendController.saved(this).data.toString() } catch(ex:Exception) { report("无线场景读取失败：${ex.message}") }
         if(LocationService.live) { livePoints=LocationService.activeRoute?.clone() ?: doubleArrayOf(); selectLiveStart=false }
         try {
             val saved=getSharedPreferences("route",MODE_PRIVATE).getString("points",null)
@@ -170,6 +191,7 @@ class MainActivity : ComponentActivity() {
                         running=LocationService.running; paused=LocationService.pausedState
                         position=LocationService.current; routeProgress=LocationService.progress
                         playbackStatus=LocationService.status
+                        backendStatus=BackendController.status
                         if(LocationService.live) LocationService.activeRoute?.let { livePoints=it }
                         if(running) speedHistory=(speedHistory+LocationService.currentSpeed*3.6).takeLast(120)
                         observer?.let { readbacks=it.snapshot(position) }
@@ -291,6 +313,7 @@ class MainActivity : ComponentActivity() {
             }
             if(section==1) { VerificationPage(); return@Column }
             SourceSettings()
+            WirelessSettings()
             PaceSettings()
             Card(Modifier.fillMaxWidth(),insideMargin=PaddingValues(16.dp)) {
                 Text("设备与权限",fontSize=20.sp,fontWeight=FontWeight.Bold)
@@ -309,8 +332,8 @@ class MainActivity : ComponentActivity() {
             }
             Card(Modifier.fillMaxWidth(),insideMargin=PaddingValues(16.dp)) {
                 Text("SimLocation",fontSize=23.sp,fontWeight=FontWeight.Bold)
-                Text("0.4.0 · Kanisuko\nRoot Edition · Redmi K60 / HyperOS 3\norg.ethertaco.simlocation",modifier=Modifier.padding(vertical=10.dp))
-                Text("当前使用系统测试定位源，mock 标记保留。\n界面：Miuix · 地图：Leaflet / OpenStreetMap",fontSize=13.sp)
+                Text("0.5.0 · Kanisuko\nRoot Edition · Redmi K60 / HyperOS 3\norg.ethertaco.simlocation",modifier=Modifier.padding(vertical=10.dp))
+                Text("系统测试定位源；可选现代 LSPosed 系统后端。\n界面：Miuix · 地图：Leaflet / OpenStreetMap",fontSize=13.sp)
                 Action("开源许可",true,Modifier.fillMaxWidth()) { showLicense() }
             }
         }
@@ -363,6 +386,48 @@ class MainActivity : ComponentActivity() {
             Action("保存运动模型",editable,Modifier.fillMaxWidth()) { saveMotion(); if(running) startService(motion(Intent(this@MainActivity,LocationService::class.java).setAction("settings"),speed.toDouble()).putExtra("loop",if(LocationService.live) false else loop)); report("运动模型已保存") }
         }
     }
+    @Composable private fun WirelessSettings() {
+        val editable=!running&&!pending
+        val initial=remember(wirelessJson) { WirelessScenario(wirelessJson) }
+        var scans by remember(wirelessJson) { mutableStateOf(initial.scans) }
+        var connection by remember(wirelessJson) { mutableStateOf(initial.connection) }
+        var cells by remember(wirelessJson) { mutableStateOf(initial.cell) }
+        var clearMock by remember(wirelessJson) { mutableStateOf(initial.clearMock) }
+        var targets by remember(wirelessJson) { mutableStateOf(initial.data.optJSONArray("targets")?.let { a -> (0 until a.length()).joinToString("\n") { a.getString(it) } } ?: "") }
+        var draft by remember(wirelessJson) { mutableStateOf(initial.data.toString(2)) }
+        var advanced by rememberSaveable { mutableStateOf(false) }
+        fun validated():String {
+            val data=JSONObject(draft).put("wifiScan",scans).put("wifiConnection",connection).put("cellEnabled",cells).put("clearMock",clearMock)
+                .put("targets",JSONArray(targets.split(Regex("[\\s,;]+" )).filter { it.isNotBlank() }))
+            return WirelessScenario(data.toString()).data.toString()
+        }
+        Card(Modifier.fillMaxWidth(),insideMargin=PaddingValues(16.dp)) {
+            Text("无线观测与系统后端",fontSize=20.sp,fontWeight=FontWeight.Bold)
+            Text(backendStatus,fontSize=13.sp,modifier=Modifier.padding(vertical=12.dp))
+            Text("可选现代 LSPosed，API 101+；只选择系统框架与电话服务作用域，启用后重启。不开启以下选项时，Root 回放不依赖 LSPosed。",fontSize=13.sp)
+            Toggle("模拟 WiFi 扫描列表",scans,editable) { scans=it }
+            Toggle("模拟已连接 WiFi 观测",connection,editable) { connection=it }
+            Toggle("模拟 LTE / NR 基站观测",cells,editable) { cells=it }
+            Toggle("修改接收位置的 mock 属性（实验）",clearMock,editable) { clearMock=it }
+            Text("四项可独立组合，仅在位置回放期间生效。停止或 12 s 心跳超时会恢复原结果；不修改真实无线连接、SIM 或公网 IP。mock 选项只改变位置对象的属性，不能保证不可检测。",fontSize=13.sp)
+            TextField(targets,{ targets=it },label="额外作用的应用包名 / 每行一个",enabled=editable,singleLine=false,modifier=Modifier.fillMaxWidth().padding(vertical=12.dp))
+            Text("空白表示仅 SimLocation 自身验证。指定应用的数据在系统侧处理，不向应用进程注入；已经建立的基站订阅需重新订阅。",fontSize=13.sp)
+            Text("场景：${initial.data.getString("name")} · ${initial.wifi.size} 个 AP · ${initial.cells.size} 个基站",modifier=Modifier.padding(top=12.dp))
+            Toggle("编辑观测场景",advanced,editable) { advanced=it }
+            AnimatedVisibility(advanced) {
+                Column {
+                    Text("BSSID / 基站标识需要对应地点的数据。样例使用测试标识，不能映射为地图选中的地点。connectedWifi 为已连接 AP 的索引（从 0 开始）。",fontSize=13.sp)
+                    TextField(draft,{ draft=it },label="观测场景 JSON",enabled=editable,singleLine=false,modifier=Modifier.fillMaxWidth().heightIn(min=180.dp,max=320.dp).padding(top=12.dp))
+                }
+            }
+            Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                Action("导入场景",editable,Modifier.weight(1f)) { importWireless.launch(arrayOf("application/json","text/plain","*/*")) }
+                Action("导出场景",editable,Modifier.weight(1f)) { wirelessExport=JSONObject(validated()).toString(2); exportWireless.launch("SimLocation-scenario.json") }
+            }
+            Action("保存无线配置",editable,Modifier.fillMaxWidth(),true) { saveWireless(validated()) }
+            Action("载入测试样例（关闭所有选项）",editable,Modifier.fillMaxWidth()) { saveWireless(WirelessScenario.example()) }
+        }
+    }
     @Composable private fun LivePage() {
         val editable=!pending&&(!running||LocationService.live)
         Column(Modifier.fillMaxSize()) {
@@ -401,7 +466,7 @@ class MainActivity : ComponentActivity() {
         Card(Modifier.fillMaxWidth(),insideMargin=PaddingValues(16.dp)) {
             Text("实际生效验证",fontSize=20.sp,fontWeight=FontWeight.Bold)
             Text("活动配置：${LocationService.activeConfiguration}",modifier=Modifier.padding(vertical=12.dp))
-            Text("GPS / network 注入：系统测试定位 · mock 保留\nWiFi / 基站观测注入：尚未启用系统后端\n移动数据与公网 IP：未改变",fontSize=13.sp)
+            Text("$backendStatus\n无线观测与 mock 属性：按活动场景配置，以下回读用于验证\n真实无线连接、移动数据与公网 IP：未改变",fontSize=13.sp)
             Text(readbacks.ifEmpty { "正在注册定位回调…" },modifier=Modifier.padding(vertical=16.dp),fontSize=14.sp)
             Text("模型速度 / km/h · 最近 60 秒",fontWeight=FontWeight.SemiBold)
             val history=speedHistory
@@ -419,6 +484,7 @@ class MainActivity : ComponentActivity() {
             }
             Text("图表来自运动模型；上方坐标来自本应用监听的 Android API。回调年龄用于识别缓存，不代表其他应用也会收到相同数据。",fontSize=13.sp,modifier=Modifier.padding(top=12.dp))
             Action("检查基站异步回调",true,Modifier.fillMaxWidth()) { observer?.requestCells() }
+            Action("检查最近 / 单次位置",true,Modifier.fillMaxWidth()) { observer?.requestLocations() }
             Action("清空图表",true,Modifier.fillMaxWidth()) { speedHistory=emptyList() }
         }
     }
@@ -444,6 +510,12 @@ class MainActivity : ComponentActivity() {
         require(gpsEnabled||networkEnabled) { "至少启用一个定位源" }
         require(gpsAccuracy.toDouble().isFinite() && gpsAccuracy.toDouble() in 0.01..10000.0 && networkAccuracy.toDouble().isFinite() && networkAccuracy.toDouble() in 0.01..10000.0 && networkInterval.toDouble().isFinite() && networkInterval.toDouble() in 0.2..60.0) { "精度应大于 0 且不超过 10000 m；间隔为 0.2–60 s" }
         getSharedPreferences("signals",MODE_PRIVATE).edit().putBoolean("gps",gpsEnabled).putBoolean("network",networkEnabled).putString("gps-accuracy",gpsAccuracy).putString("network-accuracy",networkAccuracy).putString("network-interval",networkInterval).apply()
+    }
+    private fun saveWireless(json:String) {
+        require(!running&&!pending) { "请先停止回放再修改无线场景" }
+        val validated=WirelessScenario(json).data.toString()
+        check(getSharedPreferences("wireless",MODE_PRIVATE).edit().putString("scene",validated).commit()) { "场景保存失败" }
+        wirelessJson=validated; BackendController.refreshProfile(); report("无线配置已保存，下次启动生效")
     }
     private fun sources(intent:Intent):Intent { saveSources(); return intent.putExtra("gps-enabled",gpsEnabled).putExtra("network-enabled",networkEnabled).putExtra("gps-accuracy",gpsAccuracy.toDouble()).putExtra("network-accuracy",networkAccuracy.toDouble()).putExtra("network-interval",networkInterval.toDouble()) }
     private fun saveMotion() {
@@ -504,7 +576,7 @@ class MainActivity : ComponentActivity() {
         worker.execute {
             try { RootAccess.verify(); runOnUiThread {
                 rootReady=true; message="Root 已验证"
-                permissions.launch(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION,Manifest.permission.ACCESS_FINE_LOCATION,Manifest.permission.POST_NOTIFICATIONS))
+                permissions.launch(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION,Manifest.permission.ACCESS_FINE_LOCATION,Manifest.permission.POST_NOTIFICATIONS,Manifest.permission.READ_PHONE_STATE))
             } } catch(ex:Exception) { report(ex.message ?: "Root 验证失败") }
         }
     }
@@ -522,7 +594,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun report(text:String) { runOnUiThread { message=text; Toast.makeText(this,text,Toast.LENGTH_SHORT).show() } }
     private fun showLicense() {
-        val text=listOf("LICENSE","MIUIX_LICENSE","LEAFLET_LICENSE").joinToString("\n\n") { name ->
+        val text=listOf("LICENSE","THIRD_PARTY_NOTICES.md","MIUIX_LICENSE","LEAFLET_LICENSE","LIBXPOSED_LICENSE").joinToString("\n\n") { name ->
             "$name\n"+assets.open(name).bufferedReader().use { it.readText() }
         }
         val view=android.widget.TextView(this).apply { this.text="SimLocation · Kanisuko\nAGPL-3.0-only\nhttps://github.com/Kanisuko/SimLocation\n\nMiuix: Apache-2.0 · Leaflet: BSD-2-Clause\n\n$text"; setPadding(24,24,24,24) }
@@ -545,7 +617,7 @@ class MainActivity : ComponentActivity() {
                     return true
                 }
             }
-            view.settings.apply { javaScriptEnabled=true; allowFileAccess=false; allowContentAccess=false; mixedContentMode=WebSettings.MIXED_CONTENT_NEVER_ALLOW; userAgentString="SimLocation/0.4.0 (Android; org.ethertaco.simlocation)" }
+            view.settings.apply { javaScriptEnabled=true; allowFileAccess=false; allowContentAccess=false; mixedContentMode=WebSettings.MIXED_CONTENT_NEVER_ALLOW; userAgentString="SimLocation/0.5.0 (Android; org.ethertaco.simlocation)" }
             view.addJavascriptInterface(object {
                 @JavascriptInterface fun tap(lat:Double,lon:Double) { runOnUiThread {
                     if(showLive) { try { appendLive(doubleArrayOf(lat,lon)) } catch(ex:Exception) { report(ex.message ?: "追加失败") }; return@runOnUiThread }

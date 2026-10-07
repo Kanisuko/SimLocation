@@ -54,6 +54,10 @@ system_server 与 WiFi 查询才命中。模块元数据已修正为 `system` �
 
 ## 观测注入下一阶段
 
+0.5.0 已按本方案实现可选主 APK 系统后端：固定 WiFi / LTE / NR 场景、目标包名列表、现代远程配置、
+12 s 租约恢复、同步／异步／基站订阅与实验性 Location mock 属性修改。
+具体格式与未覆盖接口见 [WIRELESS_SCENARIOS.md](WIRELESS_SCENARIOS.md)。已在 K60 / HyperOS 3 / API 102 上通过仅本应用的独立数据替换测试，详见 Android README；第三方应用尚未验证。
+
 1. 建立可编辑场景：路线、运动参数、GPS/network 参数、WiFi AP 集合、LTE/NR 基站集合。
    各项独立开关，可组合启用；同类来源每次查询只有一个最终结果，避免多个配置互相覆盖。
 2. 主应用与模块使用现代 libxposed service / remote preferences 通信。
