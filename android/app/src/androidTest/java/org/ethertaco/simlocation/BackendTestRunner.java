@@ -47,8 +47,12 @@ public final class BackendTestRunner extends Instrumentation {
             check(LocationAttributeAdapter.clear(copy,1,true,false)==copy); // Already real.
             check(LocationAttributeAdapter.clear(null,1,true,false)==null);
             if("e2e".equals(arguments.getString("mode"))) BackendDeviceTest.run(this);
-            if("ui".equals(arguments.getString("mode"))) UiFlowDeviceTest.run(this,false);
-            if("map".equals(arguments.getString("mode"))) UiFlowDeviceTest.run(this,true);
+            if("ui".equals(arguments.getString("mode"))) UiFlowDeviceTest.run(this,false,false,0);
+            if("map".equals(arguments.getString("mode"))) UiFlowDeviceTest.run(this,true,false,0);
+            if("map-route".equals(arguments.getString("mode"))) UiFlowDeviceTest.run(this,true,true,0);
+            if("map-bearing".equals(arguments.getString("mode"))) UiFlowDeviceTest.run(this,true,false,1);
+            if("map-no-speed".equals(arguments.getString("mode"))) UiFlowDeviceTest.run(this,true,false,2);
+            if("map-noise".equals(arguments.getString("mode"))) UiFlowDeviceTest.run(this,true,false,3);
             result.putString("stream","\nBackend config tests PASS: "+checks+" checks\n"); finish(-1,result);
         } catch(Throwable ex) { result.putString("stream","\nFAIL: "+ex+"\n"); finish(0,result); }
     }

@@ -45,7 +45,7 @@ final class UiFlowDeviceTest {
             else if(v instanceof Float n) e.putFloat(k,n); else throw new IllegalArgumentException("Unexpected preference type");
         }); check(e.commit(),"Cannot restore preferences");
     }
-    static void run(Instrumentation i,boolean mapCheck) throws Exception {
+    static void run(Instrumentation i,boolean mapCheck,boolean moving,int attributeCheck) throws Exception {
         check(!LocationService.running,"Stop existing playback before this test");
         Context c=i.getTargetContext();
         SharedPreferences motion=c.getSharedPreferences("motion",0), signals=c.getSharedPreferences("signals",0), wireless=c.getSharedPreferences("wireless",0);
@@ -55,6 +55,8 @@ final class UiFlowDeviceTest {
         LocationListener gpsListener=gps::set, networkListener=network::set;
         Instrumentation.ActivityMonitor monitor=i.addMonitor(MainActivity.class.getName(),null,false);
         MainActivity a=null;
+        Handler diagnostic=new Handler(Looper.getMainLooper());
+        AtomicReference<Exception> diagnosticFailure=new AtomicReference<>();
         try {
             JSONObject scene=new JSONObject(WirelessScenario.example());
             if(mapCheck) scene.put("clearMock",true).put("targets",new JSONArray().put("com.autonavi.minimap"));
@@ -65,24 +67,41 @@ final class UiFlowDeviceTest {
             MainActivity activity=a;
             await(() -> ready(activity),"Root was not detected automatically");
             set(i,a,"gpsEnabled",true); set(i,a,"networkEnabled",true); set(i,a,"networkInterval","1");
-            set(i,a,"interval","0.4"); set(i,a,"paceEnabled",true); set(i,a,"paceFast","invalid");
-            set(i,a,"speed","invalid"); set(i,a,"variation","invalid"); set(i,a,"period","invalid");
+            set(i,a,"interval","0.4"); set(i,a,"paceEnabled",!moving); set(i,a,"paceFast","invalid");
+            set(i,a,"speed",moving ? "15" : "invalid"); set(i,a,"variation",moving ? "0" : "invalid"); set(i,a,"period",moving ? "10" : "invalid");
             locations.requestLocationUpdates("gps",0,0,gpsListener,Looper.getMainLooper());
             locations.requestLocationUpdates("network",0,0,networkListener,Looper.getMainLooper());
             double[] point={31.2304,121.4737};
-            i.runOnMainSync(() -> call(activity,"start",new Class<?>[]{double[].class},(Object)point));
-            await(() -> LocationService.running&&LocationService.singlePoint,"Fixed point did not start");
+            double[] coordinates=moving ? new double[]{point[0],point[1],point[0],point[1]+0.01} : point;
+            i.runOnMainSync(() -> call(activity,"start",new Class<?>[]{double[].class},(Object)coordinates));
+            await(() -> LocationService.running&&LocationService.singlePoint==!moving,"Location session did not start");
             await(() -> gps.get()!=null&&network.get()!=null&&Math.abs(gps.get().getLatitude()-point[0])<1e-7
-                && Math.abs(network.get().getLongitude()-point[1])<1e-7,"Point did not reach both providers");
-            check(gps.get().getSpeed()==0&&network.get().getSpeed()==0,"Point has movement speed");
+                && Math.abs(network.get().getLongitude()-point[1])<(moving ? 0.001 : 1e-7),"Coordinates did not reach both providers");
+            check(moving ? gps.get().getSpeed()>3 : gps.get().getSpeed()==0&&network.get().getSpeed()==0,"Unexpected movement speed");
             check(LocationService.activeConfiguration.contains("0.4 s"),"Point ignored configured interval");
             long sent=gps.get().getElapsedRealtimeNanos();
             await(() -> gps.get().getElapsedRealtimeNanos()>sent,"Point stopped sending after first fix");
             if(mapCheck) {
+                if(attributeCheck>0) diagnostic.post(new Runnable() { public void run() {
+                    try {
+                    Location l=new Location("gps"); l.setLatitude(point[0]); l.setLongitude(point[1]); l.setAccuracy(5);
+                    l.setTime(System.currentTimeMillis()); l.setElapsedRealtimeNanos(SystemClock.elapsedRealtimeNanos());
+                    if(attributeCheck==1) { l.setSpeed(0); l.setBearing(0); }
+                    if(attributeCheck==3) {
+                        // Bounded measurement noise while the simulated device remains stationary.
+                        double phase=SystemClock.elapsedRealtime()/4000.0;
+                        l.setLatitude(point[0]+0.000015*Math.sin(phase));
+                        l.setLongitude(point[1]+0.000015*Math.cos(phase)); l.setSpeed(0);
+                    }
+                    locations.setTestProviderLocation("gps",l);
+                    diagnostic.postDelayed(this,100);
+                    } catch(Exception ex) { diagnosticFailure.set(ex); }
+                } });
                 try(var input=new ParcelFileDescriptor.AutoCloseInputStream(i.getUiAutomation(UiAutomation.FLAG_DONT_USE_ACCESSIBILITY)
                     .executeShellCommand("monkey -p com.autonavi.minimap -c android.intent.category.LAUNCHER 1"))) { input.readAllBytes(); }
-                Bundle progress=new Bundle(); progress.putString("stream","\nMap point session active for 45 s; inspect map adoption separately\n"); i.sendStatus(0,progress);
+                Bundle progress=new Bundle(); progress.putString("stream","\nMap "+(moving ? "route" : "point")+" session active for 45 s; inspect map adoption separately\n"); i.sendStatus(0,progress);
                 Thread.sleep(45000);
+                check(diagnosticFailure.get()==null,"Attribute comparison failed: "+diagnosticFailure.get());
                 return;
             }
             stop(i,a,c);
@@ -102,6 +121,7 @@ final class UiFlowDeviceTest {
             await(() -> !LocationService.pausedState&&LocationService.currentSpeed>2.9,"Updated basic speed did not take effect");
             stop(i,a,c);
         } finally {
+            i.runOnMainSync(() -> diagnostic.removeCallbacksAndMessages(null));
             try { if(a!=null) stop(i,a,c); }
             finally {
                 locations.removeUpdates(gpsListener); locations.removeUpdates(networkListener); i.removeMonitor(monitor);

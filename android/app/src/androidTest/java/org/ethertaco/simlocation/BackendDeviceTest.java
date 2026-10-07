@@ -66,6 +66,9 @@ final class BackendDeviceTest {
             double[] point={31.2304,121.4737};
             c.startForegroundService(new Intent(c,LocationService.class).setAction("start").putExtra("points",point)); started=true;
             await(BackendDeviceTest::running,10000,"Playback did not start; inspect SimLocation status");
+            check(BackendHealthProvider.acknowledged(c,"session-system",BackendController.token()),"System did not acknowledge current configuration");
+            check(BackendHealthProvider.acknowledged(c,"session-phone",BackendController.token()),"Phone did not acknowledge current configuration");
+            check(!BackendHealthProvider.acknowledged(c,"session-system",UUID.randomUUID().toString()),"Historical report accepted an unrelated session");
             await(() -> { List<ScanResult> result=wifi.getScanResults(); return result.size()==1 && "02:53:49:4d:00:01".equals(result.get(0).BSSID) && result.get(0).level==-55; },6000,"WiFi scan substitution failed");
             WifiInfo info=wifi.getConnectionInfo(); check("02:53:49:4d:00:01".equals(info.getBSSID()) && info.getRssi()==-55 && info.getFrequency()==2412,"WiFi connection substitution failed");
             check(sampleCells(phone.getAllCellInfo()),"LTE/NR cached substitution failed");
@@ -100,6 +103,6 @@ final class BackendDeviceTest {
                 BackendController.refreshProfile();
             }
         }
-        Bundle progress=new Bundle(); progress.putString("stream","\nWireless e2e PASS: WiFi, LTE/NR, callback, subscription, Location flags, expiry and stop\n"); instrument.sendStatus(0,progress);
+        Bundle progress=new Bundle(); progress.putString("stream","\nWireless e2e PASS: session acknowledgements, WiFi, LTE/NR, callback, subscription, Location flags, expiry and stop\n"); instrument.sendStatus(0,progress);
     }
 }

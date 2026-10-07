@@ -58,7 +58,26 @@ public final class BackendController {
             .put("user",Process.myUid()/100000).put("started",SystemClock.elapsedRealtime()).put("boot",Settings.Global.getInt(context.getContentResolver(),Settings.Global.BOOT_COUNT,-1));
         String nextToken=UUID.randomUUID().toString(); next.put("token",nextToken);
         active=next; token=nextToken;
-        try { publish(); } catch(Exception ex) { active=null; token=""; throw ex; }
+        try {
+            publish();
+            // Exercise protected system entry points even when their result cache is empty.
+            try {
+                context.getSystemService(android.location.LocationManager.class).getLastKnownLocation("gps");
+                if(scene.cell) context.getSystemService(android.telephony.TelephonyManager.class).getAllCellInfo();
+            } catch(SecurityException ex) {
+                throw new IllegalStateException("系统配置验证需要位置权限，请允许精确位置后重试",ex);
+            }
+            long deadline=SystemClock.elapsedRealtime()+4000;
+            while(!BackendHealthProvider.acknowledged(context,"session-system",nextToken)
+                || scene.cell&&!BackendHealthProvider.acknowledged(context,"session-phone",nextToken)) {
+                if(SystemClock.elapsedRealtime()>=deadline) throw new IllegalStateException("系统模块未确认当前配置，请重启手机后重试（覆盖安装后需重新加载）");
+                Thread.sleep(50);
+            }
+        } catch(Exception ex) {
+            active=null; token="";
+            try { publish(); } catch(Exception cleanup) { ex.addSuppressed(cleanup); }
+            throw ex;
+        }
         return nextToken;
     }
     public static synchronized void end() {

@@ -295,11 +295,10 @@ class MainActivity : ComponentActivity() {
                 Text("运动参数",fontSize=20.sp,fontWeight=FontWeight.Bold)
                 Spacer(Modifier.height(12.dp))
                 Toggle("使用配速模型",paceEnabled,editable) { paceEnabled=it }
-                if(!paceEnabled) {
-                    Field("速度 km/h",speed,editable) { speed=it }
-                    Field("速度波动 ±%",variation,editable) { variation=it }
-                    Field("波动周期 / s",period,editable) { period=it }
-                } else Text("速度由下方的配速范围、目标配速和波动参数控制。关闭配速模型后可编辑基础速度参数。",fontSize=13.sp)
+                Text(if(paceEnabled) "当前使用配速模型。基础速度参数保留并可编辑，关闭配速模型后生效；当前速度由下方配速参数控制。" else "当前使用基础速度模型，下方速度、波动和周期立即参与下一次回放或暂停后的参数应用。",fontSize=13.sp)
+                Field("基础速度 km/h",speed,editable) { speed=it }
+                Field("基础速度波动 ±%",variation,editable) { variation=it }
+                Field("基础波动周期 / s",period,editable) { period=it }
                 Field("定位更新间隔 / s",interval,editable) { interval=it }
                 Field("随机种子",seed,editable) { seed=it }
                 Row(Modifier.fillMaxWidth().padding(vertical=12.dp),verticalAlignment=Alignment.CenterVertically) {
@@ -343,7 +342,7 @@ class MainActivity : ComponentActivity() {
             }
             Card(Modifier.fillMaxWidth(),insideMargin=PaddingValues(16.dp)) {
                 Text("SimLocation",fontSize=23.sp,fontWeight=FontWeight.Bold)
-                Text("0.5.1 · Kanisuko\nRoot Edition · Redmi K60 / HyperOS 3\norg.ethertaco.simlocation",modifier=Modifier.padding(vertical=10.dp))
+                Text("0.5.2 · Kanisuko\nRoot Edition · Redmi K60 / HyperOS 3\norg.ethertaco.simlocation",modifier=Modifier.padding(vertical=10.dp))
                 Text("系统测试定位源；可选现代 LSPosed 系统后端。\n界面：Miuix · 地图：Leaflet / OpenStreetMap",fontSize=13.sp)
                 Action("开源许可",true,Modifier.fillMaxWidth()) { showLicense() }
             }
@@ -650,7 +649,7 @@ class MainActivity : ComponentActivity() {
                     return true
                 }
             }
-            view.settings.apply { javaScriptEnabled=true; allowFileAccess=false; allowContentAccess=false; mixedContentMode=WebSettings.MIXED_CONTENT_NEVER_ALLOW; userAgentString="SimLocation/0.5.1 (Android; org.ethertaco.simlocation)" }
+            view.settings.apply { javaScriptEnabled=true; allowFileAccess=false; allowContentAccess=false; mixedContentMode=WebSettings.MIXED_CONTENT_NEVER_ALLOW; userAgentString="SimLocation/0.5.2 (Android; org.ethertaco.simlocation)" }
             view.addJavascriptInterface(object {
                 @JavascriptInterface fun tap(lat:Double,lon:Double) { runOnUiThread {
                     if(showLive) { try { appendLive(doubleArrayOf(lat,lon)) } catch(ex:Exception) { report(ex.message ?: "追加失败") }; return@runOnUiThread }

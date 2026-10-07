@@ -34,12 +34,13 @@ public final class BackendHealthProvider extends ContentProvider {
         int boot=Settings.Global.getInt(c.getContentResolver(),Settings.Global.BOOT_COUNT,-1);
         if(boot!=prefs.getInt("boot",-2)) return "尚无本次启动的系统接口报告";
         StringBuilder text=new StringBuilder();
-        for(String key:new String[]{"wifi-scan","wifi-connection","cell-cache","cell-async","cell-listener","location-stream","location-current","location-last"}) {
+        for(String key:new String[]{"session-system","session-phone","wifi-scan","wifi-connection","cell-cache","cell-async","cell-listener","location-stream","location-current","location-last"}) {
             String raw=prefs.getString(key,null); if(raw==null) { text.append(key).append(": 未报告\n"); continue; }
             try {
                 JSONObject event=new JSONObject(raw); String state=event.getString("state");
                 boolean current=!BackendController.token().isEmpty() && BackendController.token().equals(event.optString("token"));
                 text.append(key).append(": ").append(state).append(" · API ").append(event.getInt("api"));
+                if(key.startsWith("session-")) text.append(current ? " · 当前配置已接收" : " · 历史配置回执");
                 if(state.equals("substituted")) text.append(current ? " · 当前会话命中" : " · 历史命中");
                 if(!event.optString("detail").isEmpty()) text.append(" · ").append(event.optString("detail"));
                 text.append('\n');
@@ -55,6 +56,16 @@ public final class BackendHealthProvider extends ContentProvider {
         JSONObject event=new JSONObject(value);
         if(event.optInt("version")!=BuildConfig.VERSION_CODE || event.optInt("api")<101 || "failed".equals(event.optString("state")))
             throw new IllegalStateException("系统接口 "+key+" 版本不符或不可用，请检查功能验证页并重启");
+    }
+    static boolean acknowledged(Context c,String key,String token) {
+        var prefs=c.getSharedPreferences("backend-health",Context.MODE_PRIVATE);
+        int boot=Settings.Global.getInt(c.getContentResolver(),Settings.Global.BOOT_COUNT,-1);
+        if(boot<0 || boot!=prefs.getInt("boot",-2) || token.isEmpty()) return false;
+        try {
+            JSONObject event=new JSONObject(prefs.getString(key,""));
+            return event.optInt("version")==BuildConfig.VERSION_CODE && event.optInt("api")>=101
+                && "installed".equals(event.optString("state")) && token.equals(event.optString("token"));
+        } catch(Exception ex) { return false; }
     }
     @Override public Cursor query(Uri u,String[] p,String s,String[] a,String o) { throw new SecurityException("Not readable"); }
     @Override public String getType(Uri u) { return null; }

@@ -63,7 +63,9 @@ public final class SystemBackend extends XposedModule {
             Snapshot s=parsed; if(s==null) return null;
             Context c=context(); if(c==null) return null;
             int boot=Settings.Global.getInt(c.getContentResolver(),Settings.Global.BOOT_COUNT,-1);
-            return SessionPolicy.active(s.issued,s.wall,s.boot,SystemClock.elapsedRealtime(),System.currentTimeMillis(),boot) ? s : null;
+            if(!SessionPolicy.active(s.issued,s.wall,s.boot,SystemClock.elapsedRealtime(),System.currentTimeMillis(),boot)) return null;
+            report(phoneProcess ? "session-phone" : "session-system","installed",s.token,"");
+            return s;
         } catch(Throwable ex) { return null; }
     }
     private boolean subscriptionTarget(String pkg,int uid) {
